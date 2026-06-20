@@ -1,0 +1,7 @@
+node_modules
+.git
+.github
+scripts
+原文明码
+_cfg.txt
+*.bak.js
