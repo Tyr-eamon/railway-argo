@@ -1,0 +1,91 @@
+name: Obfuscate and Build
+
+# 在 Actions 页面手动触发:
+#   1. 打开 Actions -> "Obfuscate and Build" -> Run workflow
+#   2. 把那段 const 配置块整体粘进 config 输入框(改好 UUID / 隧道 / NAME 等)
+#   3. 留空则直接用仓库里 原文明码 现有的配置头
+# 工作流会自动: 替换头部 -> 混淆 -> 写入 index.js -> 提交 -> 打镜像并推送
+on:
+  workflow_dispatch:
+    inputs:
+      config:
+        description: '粘贴 const 配置块(整段)。留空则用 原文明码 现有头部'
+        required: false
+        type: string
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install obfuscator
+        run: npm install javascript-obfuscator --no-save
+
+      - name: Write pasted config to file
+        env:
+          CONFIG: ${{ inputs.config }}
+        run: |
+          printf '%s' "$CONFIG" > /tmp/config.txt
+          echo "配置块字节数: $(wc -c < /tmp/config.txt)"
+
+      - name: Obfuscate into index.js
+        env:
+          CONFIG_FILE: ${{ (inputs.config != '') && '/tmp/config.txt' || '' }}
+        run: node scripts/obfuscate.js
+
+      - name: Sanity check (语法可解析)
+        run: node --check index.js
+
+      - name: Commit updated index.js
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          if [ -n "$(git status --porcelain index.js)" ]; then
+            git add index.js
+            git commit -m "Obfuscate index.js via workflow"
+            git push
+          else
+            echo "index.js 无变化,跳过提交"
+          fi
+
+      - name: Set lowercase owner
+        id: vars
+        run: |
+          OWNER_LC=$(echo "${GITHUB_REPOSITORY%%/*}" | tr '[:upper:]' '[:lower:]')
+          echo "OWNER_LC=$OWNER_LC" >> $GITHUB_ENV
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          platforms: linux/amd64,linux/arm64
+          tags: |
+            ghcr.io/${{ env.OWNER_LC }}/railway-argo:railway3
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.description=HTTP Server
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
