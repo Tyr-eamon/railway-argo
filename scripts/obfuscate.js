@@ -21,7 +21,11 @@ function buildSource() {
 
   const configFile = process.env.CONFIG_FILE;
   if (configFile && fs.existsSync(configFile)) {
-    const config = fs.readFileSync(configFile, "utf8").trimEnd();
+    let config = fs.readFileSync(configFile, "utf8");
+    // GitHub 的 workflow_dispatch 输入框是单行的,粘贴的多行配置会被压成一行,
+    // 导致某行的 // 注释把后面所有 const 声明都注释掉。
+    // 这里在每个 const/let/var 声明前强制补一个换行,恢复行边界,// 注释就只能影响自己那一行。
+    config = config.replace(/\s*\b(const|let|var)\s+/g, "\n$1 ").trim();
     console.log("使用工作流传入的配置块替换头部");
     return config + "\n\n" + body;
   }
